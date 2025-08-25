@@ -1,0 +1,30 @@
+merge_type: adaptive
+merge_method: TSV
+
+prior: 1.0
+mask_temp: 10
+
+data_location: "/data1/common_datasets/vision_cls"  
+weight_root: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32" 
+save: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
+openclip_cachedir: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
+
+
+initial_rank_ratio: 0
+extend_clamp: false
+clamp_weights: false
+TA_MODE: True
+tasks:  
+  - "Cars"
+  - "DTD"
+  - "EuroSAT"
+  - "GTSRB"
+  - "MNIST"
+  - "RESISC45"
+  - "SUN397"
+  - "SVHN"
+
+tta_batch_size: 16
+tta_eval_interval: 500
+tta_steps: 10000
+

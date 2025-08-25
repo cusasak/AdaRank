@@ -32,7 +32,10 @@ class AdaMergingModule(nn.Module):
         if config.initial_rank_ratio == 0:
             config.initial_rank_ratio = 1 / len(task_vectors)
 
-        self.svd_list = self._svd_vanilla(task_vectors)
+        if config.merge_method == "TSV":
+            self.svd_list = self._svd_tsv(task_vectors, config.initial_rank_ratio)
+        else:
+            self.svd_list = self._svd_vanilla(task_vectors)
 
         rlambdas = torch.ones(len(task_vectors), len(
             self.origin.state_dict())) * config.prior
@@ -182,6 +185,46 @@ class AdaMergingModule(nn.Module):
             svd_list.append(svd_vector)
         return svd_list
 
+    def _svd_tsv(self, task_vectors, rank_ratio):
+        num_tasks = len(task_vectors)
+        svd_list = [{} for _ in range(num_tasks)]
+        weight_keys = list(self.origin.state_dict().keys())
+        
+        for each_key in weight_keys:
+            is_svd_key = ("attn" in each_key or "mlp" in each_key) and not (
+                "ln" in each_key or "bias" in each_key
+            )
+            if is_svd_key:
+                U_list, s_list, V_T_list = [], [], []
+                for task_vector in task_vectors:
+                    U, s, V_T = torch.linalg.svd(
+                        task_vector.vector[each_key].to(self.device), full_matrices=False
+                    )
+                    dim = s.shape[0]
+                    parsed_dim = max(1, int(rank_ratio * dim))
+                    U_list.append(U[:, :parsed_dim])
+                    s_list.append(s[:parsed_dim])
+                    V_T_list.append(V_T[:parsed_dim, :])
+                
+                U_cat = torch.cat(U_list, dim=1)
+                U_ortho = self.elem_whitening(U_cat)
+                U_ortho_list = torch.chunk(U_ortho, num_tasks, dim=1)
+                
+                V_T_cat = torch.cat(V_T_list, dim=0)
+                V_T_ortho = self.elem_whitening(V_T_cat)
+                V_ortho_list = torch.chunk(V_T_ortho, num_tasks, dim=0)
+                for idx in range(num_tasks):
+                    svd_list[idx][each_key] = (U_ortho_list[idx], s_list[idx], V_ortho_list[idx])
+            else:
+                for idx in range(num_tasks):
+                    svd_list[idx][each_key] = (1 / num_tasks) * task_vectors[idx].vector[each_key]
+        
+        return svd_list
+
+    def elem_whitening(self, m):
+        u, s, v_t = torch.linalg.svd(m.to(self.device), full_matrices=False)
+        return (u @ v_t) 
+
     def _mask_init(self, task_vectors):
         self.svd_keys = []
         merge_mask = []
@@ -189,8 +232,10 @@ class AdaMergingModule(nn.Module):
             if ('attn' in key or 'mlp' in key) and not ('ln' in key or 'bias' in key):
                 self.svd_keys.append(key)
                 full_dim = min(value.shape[0], value.shape[1])
-                
-                dim = full_dim
+                if self.config.merge_method == "TSV":
+                    dim = max(1, int(full_dim * self.config.initial_rank_ratio))
+                else:
+                    dim = full_dim
                 if self.soft_mask:
                     mask = 2.0 * \
                         torch.ones(len(task_vectors), dim,
@@ -199,13 +244,15 @@ class AdaMergingModule(nn.Module):
                     mask = 0.1 * \
                         torch.ones(len(task_vectors), dim,
                                     dtype=torch.float32)
-                if (self.config.initial_rank_ratio < 1.0):
+                if (self.config.initial_rank_ratio < 1.0) and self.config.merge_method != "TSV":
                     preserved_dim = int(
                         dim * self.config.initial_rank_ratio)
                     if self.soft_mask:
                         mask[:, preserved_dim:] = 0.0
                     else:
                         mask[:, preserved_dim:] = -0.1
+                else:
+                    preserved_dim = dim
                 merge_mask.append(torch.nn.Parameter(mask, requires_grad=True))
             else:
                 merge_mask.append(torch.nn.Parameter(torch.ones(1)))

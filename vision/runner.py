@@ -257,7 +257,7 @@ def adaptive_merge_and_eval(config, device):
             loss_dict = {}
             losses = 0.0
             losses_log = {}
-            with autocast(dtype = torch.bfloat16)
+            with autocast(dtype = torch.bfloat16):
                 for idx, task in enumerate(config.tasks):
                     try:
                         data = next(tta_dataloader_iters[idx])
