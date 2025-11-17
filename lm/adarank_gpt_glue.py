@@ -8,6 +8,7 @@ from transformers import (
     default_data_collator,
     AutoConfig
 )
+import wandb
 from utils.load_config import cache_dir
 from tqdm import tqdm
 from datasets import load_dataset, load_from_disk
@@ -37,10 +38,18 @@ dataset_names = ["cola", "sst2", "mrpc", "qqp", "mnli", "qnli", "rte"]
 MODEL_NAME = "gpt2"
 GPT_CLSs = "avg"
 CPU_DEVICE: str = "cpu"
-WEIGHT_DIR: str = "/data1/common_datasets/merge_vision_weight/checkpoints/lm/gpt2"
+WEIGHT_DIR: str = "/data1/common_datasets/vision_cls/lm/gpt2"
 
 
 def run_block(args: argparse.Namespace, merge_config: DictConfig):
+    exp_name = f"gpt_{merge_config.merge_method}_{merge_config.regularization}_{merge_config.test_data_ratio}"
+    wandb.init(
+        project = "nlp_test_ratio",
+        entity="chan3864-Korea Advanced Institute of Science and Technology",
+        name=exp_name,
+        config=OmegaConf.to_container(merge_config, resolve=True),
+        reinit=True,
+    )
     args.dataset_names = dataset_names
     
     args.language_model_name = merge_config.merge_backbone
@@ -106,8 +115,10 @@ def run_block(args: argparse.Namespace, merge_config: DictConfig):
         tta_dataloader.append(loader)
     tta_dataloader_iters = [iter(dl) for dl in tta_dataloader]
 
+    best_acc = 0.0
     for step in tqdm_iterator:
         if not merge_config.skip_first_eval and (step == 0):
+            total_acc = 0.0
             model = adaptive_model.get_model()
             for idx, (dataset_name, model_to_merge) in enumerate(zip(args.dataset_names, models)):
                 model.config = AutoConfig.from_pretrained(
@@ -149,7 +160,9 @@ def run_block(args: argparse.Namespace, merge_config: DictConfig):
                             
                             pbar.set_postfix({"accuracy": acc.item()})
                         acc = accuracy.compute().item()
+                        total_acc += acc
                         print(f"Accuracy/{dataset_name}: {acc}")
+                        wandb.log({f"Accuracy/{dataset_name}": acc})
                 else:
                     with torch.no_grad():
                         mcc = MatthewsCorrCoef("multiclass", num_classes=num_labels[
@@ -177,7 +190,9 @@ def run_block(args: argparse.Namespace, merge_config: DictConfig):
                             
                             pbar.set_postfix({"mcc": acc.item()})
                         acc = mcc.compute().item()
+                        total_acc += acc
                         print(f"MCC/{dataset_name}: {acc}")
+                        wandb.log({f"MCC/{dataset_name}": acc})
         
         adaptive_model.reset_merged_state()
         optimizer.zero_grad()
@@ -193,8 +208,12 @@ def run_block(args: argparse.Namespace, merge_config: DictConfig):
             input_ids = batch["input_ids"].to(args.device)
             attention_mask = batch["attention_mask"].to(args.device)
             labels = batch["labels"].to(args.device)
-            
-            
+            ## Regularization
+            if merge_config.regularization > 0.0:
+                loss, _, val = compute_loss(adaptive_model, input_ids, attention_mask, idx, merge_config.regularization)
+                losses_log[f"Loss/Marginal Entropy/{dataset_name}"] = val.item()
+                losses_log[f"Loss/Per-sample/{dataset_name}"] = loss.item()
+
             loss, _ = compute_loss(adaptive_model, input_ids, attention_mask, idx)
             losses_log[f"Loss/Per-sample/{dataset_name}"] = loss.item()
             
@@ -209,6 +228,13 @@ def run_block(args: argparse.Namespace, merge_config: DictConfig):
         losses.backward()
         optimizer.step()
         optimizer.zero_grad()
+
+        wandb_log = {
+            "step": step,
+            "total loss": losses.item()
+        }
+        wandb_log.update(losses_log)
+        wandb.log(wandb_log)
 
         if step % merge_config.tta_eval_interval == 0:
             if step == 0:
@@ -254,6 +280,8 @@ def run_block(args: argparse.Namespace, merge_config: DictConfig):
                             
                             pbar.set_postfix({"accuracy": acc.item()})
                         acc = accuracy.compute().item()
+                        total_acc += acc
+                        wandb.log({f"Accuracy/{dataset_name}": acc})
                         print(f"Accuracy/{dataset_name}: {acc}")
                 else:
                     with torch.no_grad():
@@ -282,20 +310,31 @@ def run_block(args: argparse.Namespace, merge_config: DictConfig):
                             
                             pbar.set_postfix({"mcc": acc.item()})
                         acc = mcc.compute().item()
+                        total_acc += acc
+                        wandb.log({f"MCC/{dataset_name}": acc})
                         print(f"MCC/{dataset_name}: {acc}")
 
 
 def softmax_entropy(x: torch.Tensor):
     return -(x.softmax(dim=1) * x.log_softmax(dim=1)).sum(dim=1)
 
-def compute_loss(model: nn.Module, input_ids, attention_mask, idx: int):
+def compute_loss(model: nn.Module, input_ids, attention_mask, idx: int, regularization: float = 0.0):
     
     outputs = model(idx, input_ids, attention_mask = attention_mask)
     logits = outputs.logits
 
     loss = softmax_entropy(logits).mean(dim=0)
+    ## Regularization
+    if regularization > 0.0:
+        p_marg = logits.softmax(dim=1).mean(dim=0)
+        marginal_entropy = -(p_marg * (p_marg+1e-12).log()).sum()
 
-    return loss, outputs
+        lambda_val = regularization
+        reg_loss = lambda_val * marginal_entropy
+        val = reg_loss
+        return loss, outputs, val
+    else:
+        return loss, outputs
 
 def mrpc_tokenize_function(examples, tokenizer):
     inputs = tokenizer(

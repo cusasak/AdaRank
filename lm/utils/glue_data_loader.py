@@ -59,7 +59,7 @@ class GLUEDataLoader:
     def __init__(self, tokenizer: transformers.AutoTokenizer):
         self.tokenizer = tokenizer
 
-    def load_dataset(self, dataset_name: str, train_split_ratio_for_val: float = 0.1, max_seq_length: int = 128):
+    def load_dataset(self, dataset_name: str, train_split_ratio_for_val: float = 0.1, max_seq_length: int = 128, test_data_ratio: float = 1.0):
         sub_task_dir = os.path.join(cache_dir, dataset_name)
         dataset = datasets.load_from_disk(sub_task_dir)
 
@@ -79,9 +79,14 @@ class GLUEDataLoader:
 
         val_dataset = Subset(dataset=dataset["train"], indices=permuted_indices[num_train_data:])
         test_dataset = dataset["validation_matched"] if dataset_name == "mnli" else dataset["validation"]
+        if test_data_ratio <= 1.0:
+            eval_dataset = test_dataset
+            num_test_data = int(test_data_ratio * len(test_dataset))
+            print(f"reduce the test data size from {len(test_dataset)} to {num_test_data} in dataset {dataset_name}!")
+            test_dataset = Subset(dataset=test_dataset, indices=list(range(num_test_data)))
         num_labels = glue_data_num_labels_map[dataset_name]
 
-        return train_dataset, val_dataset, test_dataset, num_labels
+        return train_dataset, val_dataset, test_dataset, eval_dataset, num_labels
 
     def load_multitask_datasets(self, dataset_names: list, train_split_ratio_for_val: float = 0.1, max_seq_length: int = 128):
         assert isinstance(dataset_names, list) and len(dataset_names) > 1, f"wrong setting on datasets {dataset_names}!"

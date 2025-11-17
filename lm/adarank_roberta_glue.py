@@ -6,6 +6,7 @@ from functools import partial
 import time
 import torch
 print("Visible GPUs:", torch.cuda.device_count())
+import wandb
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments
 import torch.nn as nn
 import torch.optim as optim
@@ -37,6 +38,14 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"]="expandable_segments:True"
 
 def run_block(args, merge_config):
+    exp_name = f"roberta_{merge_config.merge_method}_{merge_config.regularization}_{merge_config.test_data_ratio}"
+    wandb.init(
+        project = "nlp_test_ratio",
+        entity="chan3684-Korea Advanced Institute of Science and Technology",
+        name=exp_name,
+        config=OmegaConf.to_container(merge_config, resolve=True),
+        reinit=True,
+    )
     args.language_model_name = merge_config.merge_backbone
     args.merging_method_name = merge_config.merge_method
     args.batch_size = merge_config.eval_batch_size
@@ -61,9 +70,10 @@ def run_block(args, merge_config):
 
     models_to_merge, tta_dataloaders, trainers = [], [], []
     for dataset_name, load_model_path in zip(args.dataset_names, load_model_paths):
-        train_dataset, val_dataset, test_dataset, num_labels = glue_data_loader.load_dataset(dataset_name=dataset_name,
+        train_dataset, val_dataset, test_dataset, eval_dataset, num_labels = glue_data_loader.load_dataset(dataset_name=dataset_name,
                                                                                              train_split_ratio_for_val=0.1,
-                                                                                             max_seq_length=128)
+                                                                                             max_seq_length=128,
+                                                                                             test_data_ratio=merge_config.test_data_ratio)
         training_args = TrainingArguments(
             output_dir=load_model_path,                        
             per_device_train_batch_size=merge_config.tta_batch_size,
@@ -82,7 +92,7 @@ def run_block(args, merge_config):
             model=model_to_merge,
             args=training_args,
             train_dataset=test_dataset,
-            eval_dataset=test_dataset,
+            eval_dataset=eval_dataset,
             compute_metrics=partial(compute_metrics, dataset_names=[dataset_name]),
             tokenizer=tokenizer,
         )
@@ -114,8 +124,10 @@ def run_block(args, merge_config):
     losses = 0.0
     losses_log = {}
     ent = []
+    best_acc = 0.0
     for step in tqdm_iterator:
         if not merge_config.skip_first_eval and (step == 0):
+            total_acc = 0.0
             model = adaptive_model.get_model()
             print(f"Evaluation in step 0")
             for idx, (dataset_name, trainer) in enumerate(zip(args.dataset_names, trainers)):
@@ -136,9 +148,15 @@ def run_block(args, merge_config):
                 test_metric_method = f"eval_{glue_data_metrics_map[dataset_name]}"
                 
                 if test_metric_method != "eval_accuracy" and "eval_accuracy" in test_metrics:
+                    total_acc += test_metrics['eval_accuracy']
                     print(f"Accuracy/{dataset_name}/eval_accuracy: {test_metrics['eval_accuracy']}")
+                    wandb.log({f"Accuracy/{dataset_name}/eval_accuracy": test_metrics['eval_accuracy']})
                 else:
+                    total_acc += test_metrics[test_metric_method]
                     print(f"Accuracy/{dataset_name}/{test_metric_method}: {test_metrics[test_metric_method]}")
+                    wandb.log({f"Accuracy/{dataset_name}/{test_metric_method}": test_metrics[test_metric_method]})
+            print(f"Average Accuracy: {total_acc / len(tta_dataloader_iters)}")
+            wandb.log({"Average Accuracy": total_acc / len(tta_dataloader_iters)})
 
 
         
@@ -154,8 +172,18 @@ def run_block(args, merge_config):
                 batch = next(tta_dataloader_iters[idx])
 
             batch = {k: v.to(merge_config.device) for k, v in batch.items()}
+            
+            ## Regularization
+            if merge_config.regularization > 0.0:
+                loss, _, val = compute_loss(adaptive_model, batch, idx, regularization=merge_config.regularization)
+                losses_log[f"Loss/Marginal Entropy/{dataset_name}"] = val.item()
+                losses_log[f"Loss/Per-sample/{dataset_name}"] = loss.item()
+                loss = loss - val
+            else:
+                loss, _ = compute_loss(adaptive_model, batch, idx, merge_config.regularization)
 
-            loss, _ = compute_loss(adaptive_model, batch, idx)
+
+            # loss, _ = compute_loss(adaptive_model, batch, idx)
 
             if first:
                 losses = loss
@@ -168,11 +196,19 @@ def run_block(args, merge_config):
         losses.backward()
         optimizer.step()
         optimizer.zero_grad()
+
+        wandb_log = {
+            "Step": step,
+            "total loss": losses.item(),
+        }
+        wandb_log.update(losses_log)
+        wandb.log(wandb_log)
     
         if step % merge_config.tta_eval_interval == 0:
             
             if step == 0:
                 continue
+            total_acc = 0.0
             adaptive_model.reset_merged_state()
             adaptive_model._merge_weights()
             adaptive_model.copy_params_to_model(adaptive_model._merged_state_dict, adaptive_model.base_model)
@@ -195,14 +231,21 @@ def run_block(args, merge_config):
                 test_metric_method = f"eval_{glue_data_metrics_map[dataset_name]}"
                 
                 if test_metric_method != "eval_accuracy" and "eval_accuracy" in test_metrics:
+                    total_acc += test_metrics['eval_accuracy']
+                    wandb.log({f"Accuracy/{dataset_name}/eval_accuracy": test_metrics['eval_accuracy']})
                     print(f"Accuracy/{dataset_name}/eval_accuracy: {test_metrics['eval_accuracy']}")
                 else:
+                    total_acc += test_metrics[test_metric_method]
+                    wandb.log({f"Accuracy/{dataset_name}/{test_metric_method}": test_metrics[test_metric_method]})
                     print(f"Accuracy/{dataset_name}/{test_metric_method}: {test_metrics[test_metric_method]}")
+            print(f"Average Accuracy: {total_acc / len(tta_dataloader_iters)}")
+            wandb.log({"Average Accuracy": total_acc / len(tta_dataloader_iters)})
+
 
 def softmax_entropy(x: torch.Tensor):
     return -(x.softmax(dim=1) * x.log_softmax(dim=1)).sum(dim=1)
 
-def compute_loss(model: nn.Module, inputs: dict, idx: int):
+def compute_loss(model: nn.Module, inputs: dict, idx: int, regularization: float = 0.0):
     if "labels" in inputs:
         inputs.pop("labels")
     inputs["dataset_ids"] = idx
@@ -211,7 +254,17 @@ def compute_loss(model: nn.Module, inputs: dict, idx: int):
 
     loss = softmax_entropy(logits).mean(dim=0)
 
-    return loss, outputs
+        ## Regularization
+    if regularization > 0.0:
+        p_marg = logits.softmax(dim=1).mean(dim=0)
+        marginal_entropy = -(p_marg * (p_marg+1e-12).log()).sum()
+
+        lambda_val = regularization
+        reg_loss = lambda_val * marginal_entropy
+        val = reg_loss
+        return loss, outputs, val
+    else:
+        return loss, outputs
 
 if __name__ == "__main__":
 

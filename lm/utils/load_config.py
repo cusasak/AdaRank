@@ -1,4 +1,5 @@
 import torch
 
-cache_dir = "/glue/dataset/dir"
-weight_dir = "finetuned/weights/dir"
+cache_dir = "/data2/common_datasets/vision_cls/glue"
+weight_dir = "/data2/common_datasets/vision_cls/lm"
+[]
