@@ -1,14 +1,14 @@
-merge_type: adaptive
-merge_method: Iso_CTS
+merge_type: static
+merge_method: Iso_c
 
-prior: 1.2
+prior: 1.0
 mask_temp: 10
 
 data_location: "/data1/common_datasets/vision_cls"  
-weight_root: "/data1/common_datasets/shared_weight/ViT-B-32" 
-save: "/data1/common_datasets/shared_weight/ViT-B-32"
-openclip_cachedir: "/data1/common_datasets/shared_weight/ViT-B-32"
-common_space_fraction: 0.8
+weight_root: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32" 
+save: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
+openclip_cachedir: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
+
 
 initial_rank_ratio: 1.0
 extend_clamp: false
@@ -29,11 +29,14 @@ tasks:
   - "OxfordIIITPet"
   - "PCAM"
   - "FER2013"
+  - "EMNIST"
+  - "CIFAR10"
+  - "Food101"
+  - "FashionMNIST"
+  - "RenderedSST2"
+  - "KMNIST"
 
 tta_batch_size: 16
 tta_eval_interval: 500
 tta_steps: 10000
 
-
-regularization: True
-regularization_lambda: 0.5

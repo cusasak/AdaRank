@@ -112,11 +112,11 @@ hydra:
     hydra:
     - hydra.mode=RUN
     task:
-    - config_list_path=configs/adarank_B_T14/adarank_iso_cts.yaml
+    - config_list_path=./configs/adarank_B_T14/adarank_iso_cts.yaml
   job:
     name: main
     chdir: null
-    override_dirname: config_list_path=configs/adarank_B_T14/adarank_iso_cts.yaml
+    override_dirname: config_list_path=./configs/adarank_B_T14/adarank_iso_cts.yaml
     id: ???
     num: ???
     config_name: hydra_default

@@ -310,7 +310,15 @@ def adaptive_merge_and_eval(config, device):
                 outputs = adaptive_model(x, task)
                 
                 per_sample_loss = softmax_entropy(outputs).mean(dim=0) 
-                loss = per_sample_loss
+
+                if config.regularization:
+                    p_marg = outputs.softmax(dim=-1).mean(dim=0)
+                    marginal_entropy = -(p_marg * (p_marg + 1e-12).log()).sum()
+                    lamdba_val = config.regularization_lambda
+                    loss = per_sample_loss - lamdba_val * marginal_entropy
+                    losses_log[f"Loss/Marginal Entropy/{task}"] = marginal_entropy.item()
+                else:
+                    loss = per_sample_loss
                 
                 loss_dict[task] = loss.item()
                 losses += loss

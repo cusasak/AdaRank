@@ -1,15 +1,15 @@
 merge_type: static
 merge_method: Iso_CTS
 
-prior: 1.6
+prior: 1.2
 mask_temp: 10
 
 data_location: "/data1/common_datasets/vision_cls"  
-weight_root: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32" 
-save: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
-openclip_cachedir: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
+weight_root: "/data1/common_datasets/shared_weight/ViT-B-32" 
+save: "/data1/common_datasets/shared_weight/ViT-B-32"
+openclip_cachedir: "/data1/common_datasets/shared_weight/ViT-B-32"
 
-common_space_fraction: 0.8
+common_space_fraction: 0.5
 initial_rank_ratio: 1.0
 extend_clamp: false
 clamp_weights: false
@@ -23,7 +23,12 @@ tasks:
   - "RESISC45"
   - "SUN397"
   - "SVHN"
-
+  - "CIFAR100"
+  - "STL10"
+  - "Flowers102"
+  - "OxfordIIITPet"
+  - "PCAM"
+  - "FER2013"
 tta_batch_size: 16
 tta_eval_interval: 500
 tta_steps: 10000

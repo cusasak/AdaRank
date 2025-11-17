@@ -1,7 +1,7 @@
 merge_type: adaptive
 merge_method: Iso_CTS
 
-prior: 1.2
+prior: 1.0
 mask_temp: 10
 
 data_location: "/data1/common_datasets/vision_cls"  
@@ -29,11 +29,16 @@ tasks:
   - "OxfordIIITPet"
   - "PCAM"
   - "FER2013"
+  - "EMNIST"
+  - "CIFAR10"
+  - "Food101"
+  - "FashionMNIST"
+  - "RenderedSST2"
+  - "KMNIST"
 
 tta_batch_size: 16
 tta_eval_interval: 500
 tta_steps: 10000
-
 
 regularization: True
 regularization_lambda: 0.5
