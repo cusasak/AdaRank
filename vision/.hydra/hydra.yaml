@@ -112,11 +112,11 @@ hydra:
     hydra:
     - hydra.mode=RUN
     task:
-    - config_list_path=./configs/adarank_B_T8/adarank_CART.yaml
+    - config_list_path=configs/adarank_B_T14/adarank_iso_cts.yaml
   job:
     name: main
     chdir: null
-    override_dirname: config_list_path=./configs/adarank_B_T8/adarank_CART.yaml
+    override_dirname: config_list_path=configs/adarank_B_T14/adarank_iso_cts.yaml
     id: ???
     num: ???
     config_name: hydra_default
@@ -130,18 +130,18 @@ hydra:
   runtime:
     version: 1.3.2
     version_base: '1.3'
-    cwd: /data2/david3684/adarank_summision
+    cwd: /data2/lcy9442/Iso_AdaRank/vision
     config_sources:
     - path: hydra.conf
       schema: pkg
       provider: hydra
-    - path: /data2/david3684/adarank_summision/configs
+    - path: /data2/lcy9442/Iso_AdaRank/vision/configs
       schema: file
       provider: main
     - path: ''
       schema: structured
       provider: schema
-    output_dir: /data2/david3684/adarank_summision
+    output_dir: /data2/lcy9442/Iso_AdaRank/vision
     choices:
       hydra/env: default
       hydra/callbacks: null

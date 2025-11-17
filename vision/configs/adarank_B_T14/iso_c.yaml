@@ -1,7 +1,7 @@
-merge_type: adaptive
-merge_method: TA
+merge_type: static
+merge_method: Iso_c
 
-prior: 0.3
+prior: 1.0
 mask_temp: 10
 
 data_location: "/data1/common_datasets/vision_cls"  
@@ -23,6 +23,12 @@ tasks:
   - "RESISC45"
   - "SUN397"
   - "SVHN"
+  - "CIFAR100"
+  - "STL10"
+  - "Flowers102"
+  - "OxfordIIITPet"
+  - "PCAM"
+  - "FER2013"
 
 tta_batch_size: 16
 tta_eval_interval: 500

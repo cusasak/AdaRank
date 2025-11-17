@@ -312,6 +312,108 @@ class StaticMergeModule(nn.Module):
             print(f"current coefficient: {coeff} with {len(self.config.tasks)} tasks")
             self._merged_state_dict = self._get_origin(coeff)
 
+        elif merge_method == "Iso_c":
+            state_dict = deepcopy(self.pretrained_model.state_dict())
+            weight_keys = list(self.pretrained_model.state_dict().keys())
+        
+            for each_key in tqdm(weight_keys, desc="Merging weights with Iso_c"):
+                # is_svd_key = ("attn" in each_key or "mlp" in each_key) and not (
+                #     "ln" in each_key or "bias" in each_key
+                # )
+                shape_ = self.task_vectors[0].vector[each_key].shape
+                is_2d_matrix = (len(shape_) == 2) and ("text_projection" not in each_key)
+                new_vector = {}
+                tvs = [task_vector.vector[each_key].to(self.device) for task_vector in self.task_vectors]
+                new_vector[each_key] = sum(tvs) / len(tvs)
+                if is_2d_matrix:
+                    new_vector[each_key] *= len(tvs)
+                    U, s, V_T = torch.linalg.svd(
+                        new_vector[each_key], full_matrices=False
+                    )
+                    s_mean = torch.ones_like(s) * s.mean()
+                    new_vector[each_key] = torch.linalg.multi_dot([U, torch.diag(s_mean), V_T])
+
+                state_dict[each_key] = state_dict[each_key].to(self.device) + self.config.prior * new_vector[each_key].to(self.device)
+            self._merged_state_dict = state_dict
+                    
+        elif merge_method == "Iso_CTS":
+            state_dict = deepcopy(self.pretrained_model.state_dict())
+            weight_keys = list(self.pretrained_model.state_dict().keys())
+            
+            
+            new_vectors = {}
+            print("Computing SVD...")
+            for each_key in tqdm(weight_keys, desc="Computing SVD for Iso_CTS"):
+                # is_svd_key = ("attn" in each_key or "mlp" in each_key) and not (
+                #     "ln" in each_key or "bias" in each_key
+                # )
+                shape_ = self.task_vectors[0].vector[each_key].shape
+                is_2d_matrix = (len(shape_) == 2) and ("text_projection" not in each_key)
+                if not is_2d_matrix:
+                    for i, task_vector in enumerate(self.task_vectors):
+                        vec = task_vector.vector[each_key].to(self.device)
+                        if i==0:
+                            new_vectors[each_key] = vec.clone()
+                        else:
+                            new_vectors[each_key] += (vec - new_vectors[each_key]) / (i+1)
+                    continue
+
+                # print(f"Computing common space using sum from {each_key}...")
+                combined_w = sum([tv.vector[each_key].to(self.device) for tv in self.task_vectors])
+
+                ## check task specific size can be equally divided
+                common_space_index_s = int(min(shape_) * self.config.common_space_fraction)
+                _task_specific_total_space_index_s = round((min(shape_) - common_space_index_s) / len(self.exam_datasets)) * len(self.exam_datasets)
+                common_space_index_s = min(shape_) - _task_specific_total_space_index_s
+
+                u, s, v = torch.linalg.svd(combined_w, full_matrices=False)
+                common_space_u = u[:, :common_space_index_s]
+                common_space_s = s[:common_space_index_s]
+                common_space_v = v[:common_space_index_s, :]
+
+                ## calculate task specific space
+                n_dims_per_task = int((min(shape_) - common_space_index_s) / len(self.exam_datasets))
+                for i, task_vector in enumerate(self.task_vectors):
+                    w = task_vector.vector[each_key].to(self.device)
+
+                    # calculate the projection onto task specific space to remove the common space
+                    w_ts = w - common_space_u @ common_space_u.T @ w
+                    u_ts, s_ts, v_ts = torch.linalg.svd(w_ts, full_matrices=False)            
+                    
+                    if i == 0:
+                        combined_space_u = torch.zeros_like(u_ts, device=self.device)
+                        combined_space_s = torch.zeros_like(s_ts, device=self.device)
+                        combined_space_v = torch.zeros_like(v_ts, device=self.device)
+                        
+                    combined_space_u[:, i * n_dims_per_task : (i + 1) * n_dims_per_task] = u_ts[:, :n_dims_per_task]
+                    combined_space_s[i * n_dims_per_task : (i + 1) * n_dims_per_task] = s_ts[:n_dims_per_task]
+                    combined_space_v[i * n_dims_per_task : (i + 1) * n_dims_per_task, :] = v_ts[:n_dims_per_task, :]
+                
+                combined_space_u[:, len(self.exam_datasets) * n_dims_per_task : len(self.exam_datasets) * n_dims_per_task + common_space_index_s] = common_space_u
+                combined_space_s[len(self.exam_datasets) * n_dims_per_task : len(self.exam_datasets) * n_dims_per_task + common_space_index_s] = common_space_s
+                combined_space_v[len(self.exam_datasets) * n_dims_per_task : len(self.exam_datasets) * n_dims_per_task + common_space_index_s, :] = common_space_v
+                
+                ### Orthogonalize combined_space_u and combined_space_v ###
+                # u_combined_space_u, s_combined_space_u, v_combined_space_u = torch.linalg.svd(combined_space_u, full_matrices=False)
+                # u_combined_space_v, s_combined_space_v, v_combined_space_v = torch.linalg.svd(combined_space_v, full_matrices=False)
+                combined_space_u = self.elem_whitening(combined_space_u)
+                combined_space_v = self.elem_whitening(combined_space_v)
+                
+                combined_space_s = torch.ones_like(combined_space_s) * combined_space_s.mean()
+                        
+                new_vectors[each_key] = torch.linalg.multi_dot(
+                    (
+                        combined_space_u,
+                        torch.diag(combined_space_s),
+                        combined_space_v,
+                    )
+                )
+
+                state_dict[each_key] = state_dict[each_key].to(self.device) + self.config.prior * new_vectors[each_key].to(self.device)
+            
+            self._merged_state_dict = state_dict 
+        
+
 
         elif merge_method == "CART_TSV":
             

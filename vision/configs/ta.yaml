@@ -1,4 +1,4 @@
-merge_type: adaptive
+merge_type: static
 merge_method: TA
 
 prior: 0.3

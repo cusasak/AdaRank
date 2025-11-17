@@ -1,4 +1,4 @@
-config_list_path: ./configs/adarank_B_T8/adarank_CART.yaml
+config_list_path: configs/adarank_B_T14/adarank_iso_cts.yaml
 do_parallel: false
 model: ViT-B-32
 pretrained_model: openai
@@ -32,3 +32,6 @@ normalized_merging_weights: false
 clamp_weights: false
 extend_clamp: false
 TA_MODE: true
+common_space_fraction: 0.8
+use_8bit_adam: false
+half_precision: false

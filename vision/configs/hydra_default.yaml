@@ -63,6 +63,7 @@ extend_clamp: false
 
 TA_MODE: True
 
+common_space_fraction: 0.8
 # Memory Saving Options
 use_8bit_adam: false
 half_precision: false

@@ -1,13 +1,15 @@
-merge_type: adaptive
-merge_method: TA
+merge_type: static
+merge_method: Iso_c
 
-prior: 0.3
+model: "ViT-L-14" 
+
+prior: 1.0
 mask_temp: 10
 
 data_location: "/data1/common_datasets/vision_cls"  
-weight_root: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32" 
-save: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
-openclip_cachedir: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
+weight_root: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-L-14" 
+save: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-L-14"
+openclip_cachedir: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-L-14"
 
 
 initial_rank_ratio: 1.0

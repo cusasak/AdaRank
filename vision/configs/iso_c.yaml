@@ -1,7 +1,7 @@
-merge_type: adaptive
-merge_method: TA
+merge_type: static
+merge_method: Iso_c
 
-prior: 0.3
+prior: 1.6
 mask_temp: 10
 
 data_location: "/data1/common_datasets/vision_cls"  

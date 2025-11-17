@@ -5,9 +5,9 @@ prior: 2.3
 mask_temp: 10
 
 data_location: "/data1/common_datasets/vision_cls"  
-weight_root: "/data1/common_datasets/shared_weight/ViT-B-32" 
-save: "/data1/common_datasets/shared_weight/ViT-B-32"  
-openclip_cachedir: "/data1/common_datasets/shared_weight/ViT-B-32"
+weight_root: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32" 
+save: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
+openclip_cachedir: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
 initial_rank_ratio: 0.16
 extend_clamp: false
 clamp_weights: false

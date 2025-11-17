@@ -1,7 +1,7 @@
-merge_type: adaptive
-merge_method: TA
+merge_type: static
+merge_method: Iso_CTS
 
-prior: 0.3
+prior: 1.4
 mask_temp: 10
 
 data_location: "/data1/common_datasets/vision_cls"  
@@ -9,7 +9,7 @@ weight_root: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
 save: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
 openclip_cachedir: "/data1/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
 
-
+common_space_fraction: 0.6
 initial_rank_ratio: 1.0
 extend_clamp: false
 clamp_weights: false

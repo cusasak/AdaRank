@@ -5,7 +5,7 @@ import ray
 from omegaconf import OmegaConf, DictConfig
 import torch
 from torch import optim
-
+import wandb
 from bitsandbytes.optim import Adam8bit
 from torch.cuda.amp import autocast, GradScaler
 
@@ -69,7 +69,7 @@ def load_model(config, device, get_raw_weight=False):
     """
     load origin and task vectors for CLIP-ViT
     """
-    logging.info("Loading models...")
+    # logging.info("Loading models...")
     model_list = {}
     zero_shot_encoder = ImageEncoder(args=config, keep_lang=False).to(device)
     for name in config.tasks:
@@ -96,7 +96,7 @@ def load_model(config, device, get_raw_weight=False):
     if get_raw_weight:
         return {"origin": zero_shot_encoder, "task_vectors": model_list}
 
-    logging.info("Constructing task vectors...")
+    # logging.info("Constructing task vectors...")
     task_vectors = []
 
     # move origin to average
@@ -161,7 +161,7 @@ def eval_zeroshot(config):
     return test_log
 
 def static_merge_and_eval(config):
-    logging.info("Evaluating merge method: %s", config.merge_method)
+    # logging.info("Evaluating merge method: %s", config.merge_method)
     ret = load_model(config, CPU_DEVICE)
     mtl_model = StaticMergeModule(
         config=config,
@@ -177,8 +177,9 @@ def static_merge_and_eval(config):
         index=None,
         exp_config=config,
     )
+    tot_acc = 0.0
     for task in config.tasks:
-        logging.info("Evaluating task: %s", task)
+        # logging.info("Evaluating task: %s", task)
         classification_head = get_classification_head(config, task)
         metrics = eval_single_dataset(
             image_encoder=image_encoder.to(config.device),
@@ -187,7 +188,10 @@ def static_merge_and_eval(config):
             args=config,
         )
         test_log.add_score(task, metrics.get("top1", 0.0))
+        logging.info("Task: %s, Top-1 Accuracy: %.4f", task, metrics.get("top1", 0.0))
+        tot_acc += metrics.get("top1", 0.0)
 
+    logging.info("Average Top-1 Accuracy: %.4f", tot_acc / len(config.tasks))
     return test_log
 
 
@@ -200,7 +204,7 @@ def adaptive_merge_and_eval(config, device):
         zero_shot_encoder=ret["origin"],
         task_vectors=ret["task_vectors"],
     ).to(device)
-    
+    wandb.watch(adaptive_model, log="all", log_freq=100)
     if config.use_8bit_adam:
         optimizer = Adam8bit(
             filter(lambda p: p.requires_grad, adaptive_model.parameters()),
@@ -216,10 +220,10 @@ def adaptive_merge_and_eval(config, device):
             weight_decay=0.0,
         )
 
-    logging.info("Preparing DataLoaders...")
+    # logging.info("Preparing DataLoaders...")
     tta_dataloaders = []
     for task_name in config.tasks:
-        logging.info("Loading dataset for task: %s", task_name)
+        # logging.info("Loading dataset for task: %s", task_name)
         dataset = get_dataset(
             dataset_name=task_name,
             preprocess=ret["origin"].val_preprocess,
@@ -238,7 +242,7 @@ def adaptive_merge_and_eval(config, device):
     garbage_collect()
 
     tta_dataloader_iters = [iter(dl) for dl in tta_dataloaders]
-    tqdm_iterator = tqdm(range(config.tta_steps), desc="TTA steps", dynamic_ncols=True)
+    tqdm_iterator = tqdm(range(config.tta_steps+1), desc="TTA steps", dynamic_ncols=True)
 
     if config.half_precision:
         scaler = GradScaler()
@@ -246,6 +250,11 @@ def adaptive_merge_and_eval(config, device):
     best_acc = -1.0
     best_task_accuracies = None
     avg_acc, task_accuracies = get_results(adaptive_model, config)
+    wandb.log({
+            "TTA Step": 0,
+            "Average Accuracy": avg_acc,
+            **{f"Accuracy/{task}": acc for task, acc in zip(config.tasks, task_accuracies)}
+        })
     logging.info("Initial evaluation - Average Accuracy: %.4f", avg_acc)
     best_acc = avg_acc
     best_task_accuracies = task_accuracies
@@ -257,7 +266,7 @@ def adaptive_merge_and_eval(config, device):
             loss_dict = {}
             losses = 0.0
             losses_log = {}
-            with autocast(dtype = torch.bfloat16)
+            with autocast(dtype = torch.bfloat16):
                 for idx, task in enumerate(config.tasks):
                     try:
                         data = next(tta_dataloader_iters[idx])
@@ -312,7 +321,13 @@ def adaptive_merge_and_eval(config, device):
             tqdm_iterator.set_description(
                 f"TTA step: {step}, {loss_dict}, overall_loss: {avg_loss}"
             )
-            
+            wandb_log = {
+                "TTA Step": step+1,
+                "Overall Loss": avg_loss,
+                **{f"Loss/{task}": loss for task, loss in loss_dict.items()}
+            }
+            wandb_log.update(losses_log)
+            wandb.log(wandb_log, step=step+1)
             losses.backward()
             optimizer.step()
             
@@ -322,6 +337,11 @@ def adaptive_merge_and_eval(config, device):
             else:
                 avg_acc, task_accuracies = get_results(adaptive_model, config)
                 logging.info("TTA step: %s, avg_acc: %s", step, avg_acc)
+                wandb.log({
+                    "TTA Step": step+1,
+                    "Average Accuracy": avg_acc,
+                    **{f"Accuracy/{task}": acc for task, acc in zip(config.tasks, task_accuracies)}
+                }, step=step+1)
                 if avg_acc > best_acc:
                     best_acc = avg_acc
                     best_task_accuracies = task_accuracies
@@ -329,7 +349,7 @@ def adaptive_merge_and_eval(config, device):
     if best_task_accuracies is None:
         avg_acc, best_task_accuracies = get_results(adaptive_model, config)
         best_acc = avg_acc
-
+    wandb.finish()
     return None
 
 
@@ -360,14 +380,21 @@ def get_results(adamerging_mtl_model, config):
 def run_experiment(cfg: DictConfig):
     check_config_sanity(cfg)
     cfg.device = set_device(cfg.device)
-    logging.info("Current config:\n%s", OmegaConf.to_yaml(cfg))
+    # logging.info("Current config:\n%s", OmegaConf.to_yaml(cfg))
+    wandb.init(
+        project="iso_adarank",
+        entity="chan3684-Korea Advanced Institute of Science and Technology",
+        config=OmegaConf.to_container(cfg, resolve=True),
+        name=f"iso_cf_{cfg.common_space_fraction}",
+        reinit=True,
+    )
 
 
     if cfg.merge_method == "individual":
-        logging.info("Running individual checkpoint evaluation...")
+        # logging.info("Running individual checkpoint evaluation...")
         ret = eval_individual_checkpoints(cfg)
     elif cfg.merge_method == "zeroshot":
-        logging.info("Running zeroshot checkpoint evaluation...")
+        # logging.info("Running zeroshot checkpoint evaluation...")
         ret = eval_zeroshot(cfg)
     else:
         if cfg.merge_type == "static":
@@ -378,7 +405,7 @@ def run_experiment(cfg: DictConfig):
             ret = adaptive_merge_and_eval(cfg, cfg.device)
         else:
             raise ValueError(f"Unknown merge type: {cfg.merge_type}")
-
+    wandb.finish()
     return ret
 
 
