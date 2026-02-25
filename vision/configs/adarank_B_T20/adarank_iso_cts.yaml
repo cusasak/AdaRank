@@ -4,10 +4,10 @@ merge_method: Iso_CTS
 prior: 1.0
 mask_temp: 10
 
-data_location: "/data1/common_datasets/vision_cls"  
-weight_root: "/data1/common_datasets/shared_weight/ViT-B-32" 
-save: "/data1/common_datasets/shared_weight/ViT-B-32"
-openclip_cachedir: "/data1/common_datasets/shared_weight/ViT-B-32"
+data_location: "/data2/common_datasets/vision_cls"  
+weight_root: "/data2/common_datasets/merge_vision_weight/checkpoints/ViT-B-32" 
+save: "/data2/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
+openclip_cachedir: "/data2/common_datasets/merge_vision_weight/checkpoints/ViT-B-32"
 common_space_fraction: 0.8
 
 initial_rank_ratio: 1.0
